@@ -30,8 +30,15 @@ async def favicon():
 def register_agent(body: Registration, x_api_key: str = Header(...)):
     if x_api_key != os.environ["MCP_SECRET"]:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Automatically approve and add to registry
     registry[body.name] = body.url
-    return JSONResponse(content={"status": "registered"}, status_code=200)
+    print(f"✅ Auto-approved agent '{body.name}' with URL: {body.url}")
+    
+    return JSONResponse(
+        content={"status": "registered", "name": body.name, "url": body.url},
+        status_code=200
+    )
 
 @app.post("/relay", operation_id="relayMessage")
 def relay_message(body: RelayMessage):
