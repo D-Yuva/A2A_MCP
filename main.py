@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse    # 🔧 Add this
+from fastapi.responses import PlainTextResponse   
 from pydantic import BaseModel
 import requests
 from fastapi_mcp import FastApiMCP
@@ -15,11 +15,11 @@ class RelayMessage(BaseModel):
     session_id: str
     message: str
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 async def root():
     return PlainTextResponse("🌟 Agent Relay is live!")
 
-@app.get("/favicon.ico", include_in_schema=False)
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 async def favicon():
     return PlainTextResponse("", status_code=204)
 
