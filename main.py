@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import PlainTextResponse    # 🔧 Add this
 from pydantic import BaseModel
 import requests
 from fastapi_mcp import FastApiMCP
@@ -25,6 +26,7 @@ async def favicon():
 @app.post("/register", operation_id="registerAgent")
 async def register_agent(body: Registration, req: Request):
     registry[body.name] = body.url
+    print(f"[REGISTER] {body.name} → {body.url}")
     return {"status": "registered"}
 
 @app.post("/relay", operation_id="relayMessage")
@@ -33,8 +35,10 @@ async def relay_message(body: RelayMessage):
     url = registry.get(target)
     if not url:
         raise HTTPException(404, f"{target} not registered")
+    print(f"[RELAY] session={body.session_id} → {target} @ {url}")
     resp = requests.post(url, json=body.dict(), timeout=10)
     return {"reply": resp.json().get("reply", "")}
 
+# Mount MCP endpoints after defining routes
 mcp = FastApiMCP(app, name="Agent Relay MCP")
 mcp.mount()
