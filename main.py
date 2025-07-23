@@ -14,6 +14,14 @@ class RelayMessage(BaseModel):
     session_id: str
     message: str
 
+@app.get("/", include_in_schema=False)
+async def root():
+    return PlainTextResponse("🌟 Agent Relay is live!")
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return PlainTextResponse("", status_code=204)
+
 @app.post("/register", operation_id="registerAgent")
 async def register_agent(body: Registration, req: Request):
     registry[body.name] = body.url
