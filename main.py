@@ -7,6 +7,10 @@ from fastapi_mcp import FastApiMCP
 app = FastAPI()
 registry: dict[str, str] = {}
 
+class Registration(BaseModel):
+    name: str
+    url: str
+
 class RelayMessage(BaseModel):
     session_id: str
     message: str
@@ -15,12 +19,12 @@ class RelayMessage(BaseModel):
 async def root():
     return PlainTextResponse("🌟 Agent Relay is live!")
 
-@app.api_route("/favicon.ico", methods=["GET","HEAD"], include_in_schema=False)
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 async def favicon():
     return PlainTextResponse("", status_code=204)
 
 @app.post("/register", operation_id="registerAgent")
-def register_agent(body: BaseModel, req):
+def register_agent(body: Registration):
     registry[body.name] = body.url
     print(f"[REGISTER] {body.name} → {body.url}")
     return {"status": "registered"}
@@ -28,7 +32,7 @@ def register_agent(body: BaseModel, req):
 @app.post("/relay", operation_id="relayMessage")
 def relay_message(body: RelayMessage):
     print("→ /relay called with:", body)
-    session_id, target = body.session_id.split(":", 1)
+    _, target = body.session_id.split(":", 1)
     url = registry.get(target)
     print("→ target:", target, "url:", url)
     if not url:

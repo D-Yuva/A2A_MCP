@@ -1,4 +1,4 @@
-fastapi
-uvicorn
-requests
-fastapi_mcp
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+requests>=2.30.0
+fastapi_mcp>=0.1.0
