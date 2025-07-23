@@ -1,14 +1,18 @@
-import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
-from fastapi_mcp import FastApiMCP
 import os
-from fastapi import Header
-from fastapi.responses import JSONResponse
+import requests
+from fastapi import FastAPI, HTTPException, Header
+from fastapi.responses import PlainTextResponse, JSONResponse
+from pydantic import BaseModel
+from supabase import create_client, Client
+from fastapi_mcp import FastApiMCP
 
+# Initialize Supabase
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# FastAPI App
 app = FastAPI()
-registry: dict[str, str] = {}
 
 class Registration(BaseModel):
     name: str
@@ -26,19 +30,28 @@ async def root():
 async def favicon():
     return PlainTextResponse("", status_code=204)
 
+@app.get("/registry")
+def get_registry():
+    response = supabase.table("agent_registry").select("*").execute()
+    agents = {item["name"]: item["url"] for item in response.data}
+    return agents
+
 @app.post("/register")
 def register_agent(body: Registration, x_api_key: str = Header(...)):
     if x_api_key != os.environ["MCP_SECRET"]:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    registry[body.name] = body.url
-    print(f"✅ Auto-approved agent '{body.name}' with URL: {body.url}")
+    # Upsert (insert or update)
+    supabase.table("agent_registry").upsert({
+        "name": body.name,
+        "url": body.url
+    }).execute()
 
+    print(f"✅ Registered '{body.name}' with URL: {body.url}")
     return JSONResponse(
         content={"status": "registered", "name": body.name, "url": body.url},
         status_code=200
     )
-
 
 @app.post("/relay", operation_id="relayMessage")
 def relay_message(body: RelayMessage):
@@ -50,10 +63,12 @@ def relay_message(body: RelayMessage):
         raise HTTPException(status_code=400, detail="session_id must be 'session:target'")
 
     _, target = parts
-    url = registry.get(target)
-    print("→ target:", target, "url:", url)
-    if url is None:
+    response = supabase.table("agent_registry").select("url").eq("name", target).execute()
+    if not response.data:
         raise HTTPException(status_code=400, detail=f"Target '{target}' not registered")
+
+    url = response.data[0]["url"]
+    print("→ target:", target, "url:", url)
 
     try:
         resp = requests.post(url, json=body.dict(), timeout=10)
@@ -66,5 +81,6 @@ def relay_message(body: RelayMessage):
 
     return {"reply": data.get("reply", "")}
 
+# Mount to MCP
 mcp = FastApiMCP(app, name="Agent Relay MCP")
 mcp.mount()
