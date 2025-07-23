@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from fastapi_mcp import FastApiMCP
+import os
+from fastapi import Header
 
 app = FastAPI()
 registry: dict[str, str] = {}
@@ -23,10 +25,11 @@ async def root():
 async def favicon():
     return PlainTextResponse("", status_code=204)
 
-@app.post("/register", operation_id="registerAgent")
-def register_agent(body: Registration):
+@app.post("/register")
+def register_agent(body: Registration, x_api_key: str = Header(...)):
+    if x_api_key != os.environ["MCP_SECRET"]:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     registry[body.name] = body.url
-    print(f"[REGISTER] {body.name} → {body.url}")
     return {"status": "registered"}
 
 @app.post("/relay", operation_id="relayMessage")
@@ -54,8 +57,6 @@ def relay_message(body: RelayMessage):
         raise HTTPException(status_code=502, detail=f"Forwarding failed: {e}")
 
     return {"reply": data.get("reply", "")}
-
-
 
 mcp = FastApiMCP(app, name="Agent Relay MCP")
 mcp.mount()
