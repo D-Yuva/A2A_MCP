@@ -32,32 +32,29 @@ def register_agent(body: Registration):
 @app.post("/relay", operation_id="relayMessage")
 def relay_message(body: RelayMessage):
     print("→ [RELAY START] body:", body.json())
+
+    parts = body.session_id.split(":", 1)
+    if len(parts) != 2:
+        print("⚠️ Invalid session_id format:", body.session_id)
+        raise HTTPException(status_code=400, detail="session_id must be 'session:target'")
+
+    _, target = parts
+    url = registry.get(target)
+    print("→ target:", target, "url:", url)
+    if url is None:
+        raise HTTPException(status_code=400, detail=f"Target '{target}' not registered")
+
     try:
-        _, target = body.session_id.split(":", 1)
-        print("→ parsed target:", target)
-        url = registry.get(target)
-        print("→ looked up URL:", url)
-
-        if url is None:
-            print("⚠️ Unknown target, raising 400")
-            raise HTTPException(status_code=400, detail="Target not registered")
-
         resp = requests.post(url, json=body.dict(), timeout=10)
-        print("→ HTTP POST status:", resp.status_code, "| body:", resp.text[:200])
-
+        resp.raise_for_status()
         data = resp.json()
-        print("→ JSON parsed:", data)
-
-        reply = data.get("reply", "<no reply field>")
-        print("→ Reply:", reply)
-
-        return {"reply": reply}
-
-    except HTTPException:
-        raise
+        print("→ Forwarded OK, response JSON:", data)
     except Exception as e:
-        print("‼️ [RELAY ERROR]", type(e).__name__, str(e))
-        raise HTTPException(status_code=500, detail=f"Relay error: {e}")
+        print("‼️ Error in relay:", repr(e))
+        raise HTTPException(status_code=502, detail=f"Forwarding failed: {e}")
+
+    return {"reply": data.get("reply", "")}
+
 
 
 mcp = FastApiMCP(app, name="Agent Relay MCP")
