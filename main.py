@@ -52,18 +52,25 @@ def relay_message(body: RelayMessage):
     parts = body.session_id.split(":", 1)
     if len(parts) != 2:
         raise HTTPException(status_code=400, detail="session_id must be 'session:target'")
-    
-    sender, recipient = parts[0].strip(), parts[1].strip()
 
-    supabase.table("message_queue").insert({
-        "session_id": body.session_id,
-        "sender": sender,
-        "recipient": recipient,
-        "message": body.message,
-        "timestamp": datetime.utcnow()
-    }).execute()
+    sender, recipient = parts[0].strip(), parts[1].strip()
+    print("✅ Relaying from", sender, "to", recipient)
+    print("📦 Message:", body.message)
+
+    try:
+        supabase.table("message_queue").insert({
+            "session_id": body.session_id,
+            "sender": sender,
+            "recipient": recipient,
+            "message": body.message,
+            "timestamp": datetime.utcnow()
+        }).execute()
+    except Exception as e:
+        print("‼️ Supabase insert failed:", e)
+        raise HTTPException(status_code=500, detail="Supabase insert error")
 
     return {"status": "stored", "target": recipient}
+
 
 @app.get("/poll")
 def poll_messages(agent: str = Query(...)):
