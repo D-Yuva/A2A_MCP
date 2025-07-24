@@ -71,19 +71,31 @@ def relay_message(body: RelayMessage):
 
     return {"status": "stored", "target": recipient}
 
-
-
-
 @app.get("/poll")
 def poll_messages(agent: str = Query(...)):
-    response = supabase.table("message_queue").select("*").eq("recipient", agent).order("timestamp").execute()
-    messages = response.data
+    try:
+        # Fetch all messages for this agent
+        response = supabase.table("message_queue").select("*").eq("recipient", agent).order("timestamp").execute()
+        messages = response.data or []
 
-    if messages:
-        ids_to_delete = [msg["id"] for msg in messages]
-        supabase.table("message_queue").delete().in_("id", ids_to_delete).execute()
+        # Extract messages
+        message_texts = [msg["message"] for msg in messages]
 
-    return {"messages": [msg["message"] for msg in messages]}
+        # Clean up only if there are messages
+        if messages:
+            ids_to_delete = [msg["id"] for msg in messages if "id" in msg]
+            if ids_to_delete:
+                delete_response = supabase.table("message_queue").delete().in_("id", ids_to_delete).execute()
+                print("🧹 Deleted:", delete_response)
+            else:
+                print("⚠️ No IDs found to delete")
+
+        return {"messages": message_texts}
+
+    except Exception as e:
+        print("‼️ Error in /poll:", repr(e))
+        raise HTTPException(status_code=500, detail=f"Polling failed: {str(e)}")
+
 
 # Mount to MCP
 mcp = FastApiMCP(app, name="Agent Relay MCP")
