@@ -62,8 +62,7 @@ def relay_message(body: RelayMessage):
             "session_id": body.session_id,
             "sender": sender,
             "recipient": recipient,
-            "message": body.message,
-            "timestamp": datetime.utcnow()
+            "message": body.message
         }).execute()
         print("✅ Supabase insert response:", response)
     except Exception as e:
@@ -71,6 +70,7 @@ def relay_message(body: RelayMessage):
         raise HTTPException(status_code=500, detail=f"Supabase insert error: {str(e)}")
 
     return {"status": "stored", "target": recipient}
+
 
 
 
