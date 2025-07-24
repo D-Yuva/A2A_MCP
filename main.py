@@ -13,6 +13,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
 
+# Models
 class Registration(BaseModel):
     name: str
     url: str
@@ -38,7 +39,6 @@ def register_agent(body: Registration, x_api_key: str = Header(...)):
 @app.post("/relay")
 def relay_message(body: RelayMessage):
     sender, recipient = body.session_id.split(":")
-    # Store message
     supabase.table("message_queue").insert({
         "session_id": body.session_id,
         "sender": sender,
@@ -46,9 +46,11 @@ def relay_message(body: RelayMessage):
         "message": body.message
     }).execute()
 
-    # Push to agent URL
     try:
-        reg = supabase.table("agent_registry").select("url").eq("name", recipient).execute()
+        reg = supabase.table("agent_registry") \
+            .select("url") \
+            .eq("name", recipient) \
+            .execute()
         recipient_url = reg.data[0]["url"]
         requests.post(recipient_url, json={
             "session_id": body.session_id,
@@ -58,3 +60,23 @@ def relay_message(body: RelayMessage):
         print("‼️ Push failed:", e)
 
     return {"status": "stored_and_pushed", "to": recipient}
+
+@app.get("/poll")
+def poll_messages(agent: str = Query(..., description="agent name to poll for")):
+    try:
+        resp = supabase.table("message_queue") \
+            .select("*") \
+            .eq("recipient", agent) \
+            .execute()
+        messages = resp.data or []
+
+        # Extract and remove messages
+        texts = [msg["message"] for msg in messages]
+        ids = [msg["id"] for msg in messages if "id" in msg]
+        if ids:
+            supabase.table("message_queue").delete().in_("id", ids).execute()
+
+        return {"messages": texts}
+    except Exception as e:
+        print("‼️ Poll error:", e)
+        raise HTTPException(status_code=500, detail=f"Polling failed: {e}")
