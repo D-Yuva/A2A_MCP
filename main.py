@@ -1,98 +1,60 @@
 import os
-from datetime import datetime
+import requests
 from fastapi import FastAPI, HTTPException, Header, Query
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
-from fastapi_mcp import FastApiMCP
 
-# Initialize Supabase
+# Supabase init
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+MCP_SECRET = os.environ["MCP_SECRET"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# FastAPI App
 app = FastAPI()
 
-# Models
 class Registration(BaseModel):
     name: str
     url: str
 
 class RelayMessage(BaseModel):
-    session_id: str  # format: session42:target
+    session_id: str
     message: str
 
-@app.get("/", include_in_schema=False)
-async def root():
-    return PlainTextResponse("🌟 Agent Relay is live!")
-
-@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
-async def favicon():
-    return PlainTextResponse("", status_code=204)
-
-@app.get("/registry")
-def get_registry():
-    response = supabase.table("agent_registry").select("*").execute()
-    agents = {item["name"]: item["url"] for item in response.data}
-    return agents
+@app.get("/")
+def root():
+    return PlainTextResponse("📡 MCP Server is live!")
 
 @app.post("/register")
 def register_agent(body: Registration, x_api_key: str = Header(...)):
-    if x_api_key != os.environ["MCP_SECRET"]:
+    if x_api_key != MCP_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
     supabase.table("agent_registry").upsert({
         "name": body.name,
         "url": body.url
     }).execute()
-    return {"status": "registered", "name": body.name, "url": body.url}
+    return {"status": "registered", "agent": body.name}
 
 @app.post("/relay")
 def relay_message(body: RelayMessage):
-    parts = body.session_id.split(":", 1)
-    if len(parts) != 2:
-        raise HTTPException(status_code=400, detail="session_id must be 'session:target'")
+    sender, recipient = body.session_id.split(":")
+    # Store message
+    supabase.table("message_queue").insert({
+        "session_id": body.session_id,
+        "sender": sender,
+        "recipient": recipient,
+        "message": body.message
+    }).execute()
 
-    sender, recipient = parts[0].strip(), parts[1].strip()
-    print("✅ Relaying from", sender, "to", recipient)
-    print("📦 Message:", body.message)
-
+    # Push to agent URL
     try:
-        response = supabase.table("message_queue").insert({
+        reg = supabase.table("agent_registry").select("url").eq("name", recipient).execute()
+        recipient_url = reg.data[0]["url"]
+        requests.post(recipient_url, json={
             "session_id": body.session_id,
-            "sender": sender,
-            "recipient": recipient,
             "message": body.message
-        }).execute()
-        print("✅ Supabase insert response:", response)
+        })
     except Exception as e:
-        print("‼️ Supabase insert failed:", repr(e))
-        raise HTTPException(status_code=500, detail=f"Supabase insert error: {str(e)}")
+        print("‼️ Push failed:", e)
 
-    return {"status": "stored", "target": recipient}
-
-@app.get("/poll")
-def poll_messages(agent: str = Query(...)):
-    try:
-        # Fetch messages for the agent without ordering by timestamp
-        response = supabase.table("message_queue").select("*").eq("recipient", agent).execute()
-        messages = response.data or []
-
-        message_texts = [msg["message"] for msg in messages]
-
-        if messages:
-            ids_to_delete = [msg["id"] for msg in messages if "id" in msg]
-            if ids_to_delete:
-                supabase.table("message_queue").delete().in_("id", ids_to_delete).execute()
-
-        return {"messages": message_texts}
-
-    except Exception as e:
-        print("‼️ Error in /poll:", repr(e))
-        raise HTTPException(status_code=500, detail=f"Polling failed: {str(e)}")
-
-
-
-# Mount to MCP
-mcp = FastApiMCP(app, name="Agent Relay MCP")
-mcp.mount()
+    return {"status": "stored_and_pushed", "to": recipient}
