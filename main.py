@@ -1,6 +1,6 @@
 import os
-import requests
-from fastapi import FastAPI, HTTPException, Header
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -14,12 +14,13 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # FastAPI App
 app = FastAPI()
 
+# Models
 class Registration(BaseModel):
     name: str
     url: str
 
 class RelayMessage(BaseModel):
-    session_id: str
+    session_id: str  # format: session42:target
     message: str
 
 @app.get("/", include_in_schema=False)
@@ -40,46 +41,40 @@ def get_registry():
 def register_agent(body: Registration, x_api_key: str = Header(...)):
     if x_api_key != os.environ["MCP_SECRET"]:
         raise HTTPException(status_code=401, detail="Unauthorized")
-
-    # Upsert (insert or update)
     supabase.table("agent_registry").upsert({
         "name": body.name,
         "url": body.url
     }).execute()
+    return {"status": "registered", "name": body.name, "url": body.url}
 
-    print(f"✅ Registered '{body.name}' with URL: {body.url}")
-    return JSONResponse(
-        content={"status": "registered", "name": body.name, "url": body.url},
-        status_code=200
-    )
-
-@app.post("/relay", operation_id="relayMessage")
+@app.post("/relay")
 def relay_message(body: RelayMessage):
-    print("→ [RELAY START] body:", body.json())
-
     parts = body.session_id.split(":", 1)
     if len(parts) != 2:
-        print("⚠️ Invalid session_id format:", body.session_id)
         raise HTTPException(status_code=400, detail="session_id must be 'session:target'")
+    
+    sender, recipient = parts[0].strip(), parts[1].strip()
 
-    _, target = parts
-    response = supabase.table("agent_registry").select("url").eq("name", target).execute()
-    if not response.data:
-        raise HTTPException(status_code=400, detail=f"Target '{target}' not registered")
+    supabase.table("message_queue").insert({
+        "session_id": body.session_id,
+        "sender": sender,
+        "recipient": recipient,
+        "message": body.message,
+        "timestamp": datetime.utcnow()
+    }).execute()
 
-    url = response.data[0]["url"]
-    print("→ target:", target, "url:", url)
+    return {"status": "stored", "target": recipient}
 
-    try:
-        resp = requests.post(url, json=body.dict(), timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        print("→ Forwarded OK, response JSON:", data)
-    except Exception as e:
-        print("‼️ Error in relay:", repr(e))
-        raise HTTPException(status_code=502, detail=f"Forwarding failed: {e}")
+@app.get("/poll")
+def poll_messages(agent: str = Query(...)):
+    response = supabase.table("message_queue").select("*").eq("recipient", agent).order("timestamp").execute()
+    messages = response.data
 
-    return {"reply": data.get("reply", "")}
+    if messages:
+        ids_to_delete = [msg["id"] for msg in messages]
+        supabase.table("message_queue").delete().in_("id", ids_to_delete).execute()
+
+    return {"messages": [msg["message"] for msg in messages]}
 
 # Mount to MCP
 mcp = FastApiMCP(app, name="Agent Relay MCP")
