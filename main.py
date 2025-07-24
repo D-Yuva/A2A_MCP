@@ -58,18 +58,20 @@ def relay_message(body: RelayMessage):
     print("📦 Message:", body.message)
 
     try:
-        supabase.table("message_queue").insert({
+        response = supabase.table("message_queue").insert({
             "session_id": body.session_id,
             "sender": sender,
             "recipient": recipient,
             "message": body.message,
             "timestamp": datetime.utcnow()
         }).execute()
+        print("✅ Supabase insert response:", response)
     except Exception as e:
-        print("‼️ Supabase insert failed:", e)
-        raise HTTPException(status_code=500, detail="Supabase insert error")
+        print("‼️ Supabase insert failed:", repr(e))
+        raise HTTPException(status_code=500, detail=f"Supabase insert error: {str(e)}")
 
     return {"status": "stored", "target": recipient}
+
 
 
 @app.get("/poll")
